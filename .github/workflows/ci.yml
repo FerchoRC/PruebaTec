@@ -126,22 +126,32 @@ jobs:
           ./scripts/check-env.sh .env
 
       - name: Levantar la aplicación
-        run: docker compose --env-file .env up -d --no-build
+        run: |
+          docker version
+          docker compose version
+          docker compose --env-file .env up -d --no-build
+          docker compose ps -a
 
       - name: Esperar a que los contenedores estén sanos
         run: |
-          set -e
-          for _ in $(seq 1 40); do
-            pending="$(docker compose ps --format '{{.Name}}:{{.Health}}' \
-              | grep -v ':healthy$' || true)"
-            if [ -z "$pending" ]; then
-              echo "Todos los contenedores están sanos."
+          set -uo pipefail
+          CONTENEDORES="promociones-db promociones-backend promociones-frontend"
+          for intento in $(seq 1 40); do
+            pendientes=""
+            for c in $CONTENEDORES; do
+              estado="$(docker inspect --format '{{.State.Health.Status}}' "$c" 2>/dev/null)" \
+                || estado="no-existe"
+              [ "$estado" = "healthy" ] || pendientes="$pendientes $c=$estado"
+            done
+            if [ -z "$pendientes" ]; then
+              echo "Los 3 contenedores están healthy."
               exit 0
             fi
-            echo "Esperando: $pending"
+            echo "Intento $intento/40 -> pendientes:$pendientes"
             sleep 5
           done
-          echo "Los contenedores no alcanzaron el estado healthy." >&2
+          echo "::error::Los contenedores no alcanzaron el estado healthy." >&2
+          docker compose ps -a
           exit 1
 
       - name: Ejecutar el smoke test
@@ -149,9 +159,12 @@ jobs:
           chmod +x scripts/smoke-test.sh
           ./scripts/smoke-test.sh http://localhost:3001 http://localhost:8080
 
-      - name: Registros de los contenedores (si algo falló)
+      - name: Diagnóstico (si algo falló)
         if: failure()
-        run: docker compose logs --no-color --tail 200
+        run: |
+          docker compose ps -a
+          docker inspect -f '{{.Name}} {{.State.Status}} {{.State.Health.Status}}' promociones-db promociones-backend promociones-frontend || true
+          docker compose logs --no-color --tail 200
 
       - name: Detener la aplicación
         if: always()

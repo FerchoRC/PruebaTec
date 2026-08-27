@@ -68,9 +68,6 @@ docker compose down -v     # borra también el volumen de la base de datos
 
 ## 3. Variables de entorno
 
-Todas están declaradas en [`.env.example`](.env.example). **El archivo `.env`
-no se versiona** y en el repositorio no hay ninguna credencial.
-
 | Variable | Obligatoria | Por defecto | Descripción |
 |---|---|---|---|
 | `POSTGRES_USER` | Sí | — | Usuario de PostgreSQL |
@@ -81,16 +78,6 @@ no se versiona** y en el repositorio no hay ninguna credencial.
 | `FRONTEND_PORT` | No | `8080` | Puerto publicado en el host |
 | `NODE_ENV` | No | `production` | Entorno de ejecución del backend |
 | `CORS_ORIGIN` | No | `*` | Origen permitido por CORS |
-
-Hay **tres barreras** que impiden arrancar mal configurado:
-
-1. `docker-compose.yml` usa `${VAR:?mensaje}`, así que Compose aborta antes de
-   crear nada si falta una variable obligatoria.
-2. [`scripts/check-env.sh`](scripts/check-env.sh) las verifica y avisa además
-   de las que se hayan quedado atrás respecto a `.env.example`.
-3. El backend valida su configuración al arrancar
-   ([`config/env.js`](backend/src/config/env.js)) y termina con código 1
-   nombrando la variable que falta, en lugar de arrancar a medias.
 
 ---
 
@@ -113,30 +100,7 @@ npm run dev
 
 ---
 
-## 5. Pruebas y linter
-
-```bash
-cd backend  && npm run lint && npm test    # 43 pruebas
-cd frontend && npm run lint && npm test    # 29 pruebas
-```
-
-El backend cubre las reglas de dominio (validaciones, transiciones de estado,
-vigencia) y la capa HTTP con un repositorio en memoria, de modo que la suite
-corre sin necesidad de una base de datos. El frontend cubre las utilidades
-puras y el comportamiento de los componentes con Testing Library.
-
-Smoke test de la pila completa (necesita la aplicación levantada):
-
-```bash
-docker compose up -d
-./scripts/smoke-test.sh
-```
-
----
-
-## 6. API
-
-Base: `http://localhost:3001`
+## 5. API
 
 | Método | Ruta | Descripción |
 |---|---|---|
@@ -150,51 +114,9 @@ Base: `http://localhost:3001`
 | `PATCH` | `/api/promotions/:id/status` | Avanza el estado |
 | `DELETE` | `/api/promotions/:id` | Elimina, solo si está `Programada` |
 
-Ejemplo de alta:
-
-```bash
-curl -X POST http://localhost:3001/api/promotions \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "name": "Rebaja de fin de mes",
-    "targetType": "producto",
-    "productId": 1,
-    "discountType": "porcentaje",
-    "discountValue": 20,
-    "startDate": "2026-09-01",
-    "endDate": "2026-09-30"
-  }'
-```
-
-Los errores de validación devuelven `422` con el detalle por campo:
-
-```json
-{
-  "error": "La promocion tiene datos invalidos.",
-  "details": [
-    { "field": "discountValue", "message": "Un descuento por porcentaje debe estar entre 1 y 100." }
-  ]
-}
-```
-
-### Reglas de negocio aplicadas
-
-- Nombre, producto/categoría y valor de descuento son obligatorios.
-- La fecha de fin debe ser **posterior** a la de inicio.
-- Un descuento por porcentaje debe estar entre **1 y 100**; un monto fijo no
-  tiene ese techo.
-- El estado solo avanza `Programada` → `Activa` → `Finalizada`: no se puede
-  saltar pasos ni retroceder.
-- Una promoción `Finalizada` no se puede modificar (`409`).
-- Solo se puede eliminar una promoción en estado `Programada` (`409` en el
-  resto de casos).
-
-Cada regla está además respaldada por un `CHECK` en el esquema de la base de
-datos ([`db/init.sql`](db/init.sql)), que actúa como última línea de defensa.
-
 ---
 
-## 7. Integración continua
+## 6. Integración continua
 
 El flujo [`.github/workflows/ci.yml`](.github/workflows/ci.yml) encadena cuatro
 etapas dependientes; si una falla, las siguientes no se ejecutan:
@@ -219,36 +141,3 @@ Antes del primer `push`, cree en **Settings → Secrets and variables → Action
 `POSTGRES_PASSWORD` se deja deliberadamente sin fallback: es lo que demuestra
 que el pipeline se detiene cuando falta una credencial, en vez de arrancar con
 una contraseña por defecto escondida en el repositorio.
-
----
-
-## 8. Estructura del proyecto
-
-```
-.
-├── backend/
-│   ├── src/
-│   │   ├── config/env.js              # validación de la configuración
-│   │   ├── db/pool.js                 # pool de Postgres
-│   │   ├── domain/promotion.js        # reglas de negocio (código puro)
-│   │   ├── repositories/              # único punto que conoce SQL
-│   │   ├── routes/                    # /health y /api/promotions
-│   │   ├── middleware/                # manejo centralizado de errores
-│   │   ├── app.js                     # composición de la app Express
-│   │   └── server.js                  # arranque y apagado ordenado
-│   └── tests/                         # 43 pruebas (dominio, API, config)
-├── frontend/
-│   ├── src/
-│   │   ├── components/                # formulario, tabla y resumen
-│   │   ├── lib/                       # cliente HTTP y reglas de cliente
-│   │   └── App.jsx                    # estado y orquestación
-│   └── nginx.conf                     # sirve el bundle y hace de proxy a /api
-├── db/init.sql                        # esquema, restricciones y semilla
-├── scripts/
-│   ├── check-env.sh                   # falla si falta una variable
-│   └── smoke-test.sh                  # verificación de extremo a extremo
-├── .github/workflows/ci.yml
-├── docker-compose.yml
-├── .env.example
-└── DECISIONS.md
-```
